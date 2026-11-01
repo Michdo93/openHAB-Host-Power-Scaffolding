@@ -1,0 +1,42 @@
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements.txt pytest
+      - run: pytest -v
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install ansible-core ansible-lint
+      - run: ansible-lint --offline ansible/
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install sshd, Ansible, generator dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q openssh-server
+          sudo python3 -m pip install --break-system-packages -q ansible-core Jinja2 PyYAML
+      - name: Ansible + key distribution + generated rules against two local sshd
+        run: sudo env "PATH=$PATH" bash tests/e2e/lab.sh

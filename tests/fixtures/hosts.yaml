@@ -1,0 +1,59 @@
+# Fixture in the format written by ansible/export_hosts.yml
+version: 1
+source: ansible
+hosts:
+- name: lab-pc
+  address: 192.168.1.20
+  port: 22
+  os: linux
+  ssh_user: ohpower
+  mac: AA:BB:CC:00:00:20
+  interface: enp3s0
+  wol_supported: true
+  wol_enabled: false
+  poweroff: sudo -n /usr/bin/systemctl poweroff
+  reboot: sudo -n /usr/bin/systemctl reboot
+- name: nas.lab
+  address: nas.lab.local
+  port: 2222
+  os: linux
+  ssh_user: ohpower
+  mac: aa:bb:cc:00:00:30
+  interface: eth0
+  wol_supported: null
+  wol_enabled: null
+  poweroff: sudo -n /usr/sbin/shutdown -h now
+  reboot: sudo -n /usr/sbin/shutdown -r now
+- name: win-pc
+  address: 192.168.1.40
+  port: 22
+  os: windows
+  ssh_user: Admin
+  mac: null
+  interface: null
+  wol_supported: null
+  wol_enabled: null
+  poweroff: shutdown /s /t 0
+  reboot: shutdown /r /t 0
+- name: printer
+  address: 192.168.1.50
+  port: 22
+  os: linux
+  ssh_user: null
+  mac: aa:bb:cc:00:00:50
+  interface: eth0
+  wol_supported: null
+  wol_enabled: null
+  poweroff: null
+  reboot: null
+- name: old-box
+  address: 192.168.1.60
+  port: 22
+  os: linux
+  ssh_user: ohpower
+  mac: aa:bb:cc:00:00:60
+  interface: eth0
+  wol_supported: false
+  wol_enabled: false
+  poweroff: sudo -n /usr/bin/systemctl poweroff
+  reboot: sudo -n /usr/bin/systemctl reboot

@@ -1,0 +1,6 @@
+# openHAB-Host-Power-Scaffolding ({{ generated }})
+# APPEND these lines to $OPENHAB_CONF/misc/exec.whitelist – do not replace the file.
+# Each line must equal the command parameter of the Exec Thing character by character.
+{% for h in active if h.can_reboot %}
+{{ h.reboot_command }}
+{% endfor %}
