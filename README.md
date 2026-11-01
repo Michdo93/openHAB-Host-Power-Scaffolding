@@ -249,3 +249,4 @@ openHAB-Host-Power-Scaffolding/
 │   └── templates/                 host_power.things/.items/.rules/.js/.py.j2, exec.whitelist.j2
 ├── generate.py                    CLI: render | validate | list
 └── tests/                         pytest, harnesses, e2e/lab.sh
+```
