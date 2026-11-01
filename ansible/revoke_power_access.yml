@@ -1,0 +1,35 @@
+---
+# Undo power_access.yml: remove the sudoers drop-in, optionally the dedicated account.
+#
+#   ansible-playbook ansible/revoke_power_access.yml [-e target_hosts=lab] [-e remove_power_user=true]
+
+- name: Revoke the openHAB power account
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  vars:
+    pa_user: "{{ power_user | default('ohpower') }}"
+    pa_sudoers: "{{ sudoers_file | default('/etc/sudoers.d/openhab-power') }}"
+    pa_remove_user: "{{ remove_power_user | default(false) | bool }}"
+  tasks:
+    - name: Skip non-Linux hosts
+      ansible.builtin.meta: end_host
+      when: ansible_facts['system'] != 'Linux'
+
+    - name: Remove the sudoers drop-in
+      ansible.builtin.file:
+        path: "{{ pa_sudoers }}"
+        state: absent
+
+    - name: Refuse to delete the Ansible account
+      ansible.builtin.assert:
+        that: pa_user != ansible_user
+        fail_msg: "power_user is the Ansible account ({{ ansible_user }}); it is not removed."
+      when: pa_remove_user
+
+    - name: Remove the dedicated power account
+      ansible.builtin.user:
+        name: "{{ pa_user }}"
+        state: absent
+        remove: true
+      when: pa_remove_user

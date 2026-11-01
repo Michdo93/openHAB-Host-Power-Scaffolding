@@ -1,0 +1,132 @@
+---
+# Export what openHAB needs per host (address, MAC, OS, SSH account, power commands)
+# into hosts.yaml on the control node. The generator (generate.py) renders from it.
+#
+#   ansible-playbook ansible/export_hosts.yml -e target_hosts='all:!openhab-vm'
+#   ansible-playbook ansible/export_hosts.yml -e export_file=/tmp/hosts.yaml
+#
+# Variables (all optional):
+#   target_hosts          inventory pattern                          (default: all)
+#   power_user            SSH account on Linux targets               (default: ohpower)
+#   power_user_windows    SSH account on Windows targets             (default: ansible_user)
+#   power_user_darwin     SSH account on macOS targets               (default: power_user)
+#   ssh_port              sshd port the openHAB host connects to     (default: ansible_port for SSH connections, else 22)
+#   export_file           output on the control node                 (default: <repo>/hosts.yaml)
+
+- name: Collect power control data
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  vars:
+    ex_addr: "{{ ansible_host | default(inventory_hostname) }}"
+    ex_is_ssh: "{{ (ansible_connection | default('ssh')) in ['ssh', 'smart', 'paramiko', 'paramiko_ssh'] }}"
+    ex_port: "{{ ssh_port | default(ansible_port | default(22) if ex_is_ssh else 22) | int }}"
+  tasks:
+    # ---------- Linux ----------
+    - name: Linux
+      when: ansible_facts['system'] == 'Linux'
+      block:
+        - name: Determine the poweroff/reboot commands
+          ansible.builtin.include_tasks: tasks/linux_power_commands.yml
+
+        - name: Pick the interface that carries ansible_host (fallback default route)
+          ansible.builtin.set_fact:
+            ex_iface: >-
+              {{ (ansible_facts['interfaces']
+                  | map('regex_replace', '-', '_')
+                  | select('in', ansible_facts)
+                  | map('extract', ansible_facts)
+                  | selectattr('ipv4', 'defined')
+                  | selectattr('ipv4.address', 'equalto', ex_addr)
+                  | map(attribute='device') | first)
+                 | default(ansible_facts['default_ipv4'].interface | default(''), true) }}
+
+        - name: Read the MAC address of that interface
+          ansible.builtin.set_fact:
+            ex_mac: >-
+              {{ (ansible_facts[ex_iface | regex_replace('-', '_')].macaddress | default(''))
+                 if ex_iface else '' }}
+
+        - name: Query Wake-on-LAN support (ethtool)
+          ansible.builtin.command:
+            argv: [ethtool, "{{ ex_iface }}"]
+          register: ex_ethtool
+          changed_when: false
+          failed_when: false
+          when: ex_iface | length > 0
+
+        - name: Store the Linux record
+          ansible.builtin.set_fact:
+            ex_record:
+              name: "{{ inventory_hostname }}"
+              address: "{{ ex_addr }}"
+              port: "{{ ex_port | int }}"
+              os: linux
+              ssh_user: "{{ power_user | default('ohpower') }}"
+              mac: "{{ ex_mac if ex_mac not in ['', '00:00:00:00:00:00'] else none }}"
+              interface: "{{ ex_iface or none }}"
+              # true/false from ethtool ("g" = magic packet); null = unknown (no ethtool, virtual NIC)
+              wol_supported: >-
+                {{ none if (ex_ethtool.rc | default(1)) != 0 or 'Supports Wake-on' not in ex_ethtool.stdout | default('')
+                   else ('g' in (ex_ethtool.stdout | regex_search('Supports Wake-on:\s*(\S+)', '\1') | default([''], true) | first)) }}
+              wol_enabled: >-
+                {{ none if (ex_ethtool.rc | default(1)) != 0 or 'Supports Wake-on' not in ex_ethtool.stdout | default('')
+                   else ('g' in (ex_ethtool.stdout | regex_search('\n\s*Wake-on:\s*(\S+)', '\1') | default([''], true) | first)) }}
+              poweroff: "sudo -n {{ pa_cmd_poweroff }}"
+              reboot: "sudo -n {{ pa_cmd_reboot }}"
+
+    # ---------- Windows (OpenSSH Server; untested) ----------
+    - name: Store the Windows record
+      when: ansible_facts['os_family'] == 'Windows'
+      vars:
+        ex_win_if: >-
+          {{ (ansible_facts['interfaces'] | default([])
+              | selectattr('ipv4', 'defined') | selectattr('ipv4.address', 'equalto', ex_addr) | list
+             ) or (ansible_facts['interfaces'] | default([]) | selectattr('default_gateway', 'truthy') | list) }}
+      ansible.builtin.set_fact:
+        ex_record:
+          name: "{{ inventory_hostname }}"
+          address: "{{ ex_addr }}"
+          port: "{{ ex_port | int }}"
+          os: windows
+          ssh_user: "{{ power_user_windows | default(ansible_user) }}"
+          mac: "{{ (ex_win_if | first).macaddress | default(none) if ex_win_if else none }}"
+          interface: "{{ (ex_win_if | first).interface_name | default(none) if ex_win_if else none }}"
+          wol_supported: null
+          wol_enabled: null
+          poweroff: "shutdown /s /t 0"
+          reboot: "shutdown /r /t 0"
+
+    # ---------- macOS (untested) ----------
+    - name: Store the macOS record
+      when: ansible_facts['system'] == 'Darwin'
+      ansible.builtin.set_fact:
+        ex_record:
+          name: "{{ inventory_hostname }}"
+          address: "{{ ex_addr }}"
+          port: "{{ ex_port | int }}"
+          os: darwin
+          ssh_user: "{{ power_user_darwin | default(power_user | default('ohpower')) }}"
+          mac: "{{ ansible_facts['default_ipv4'].macaddress | default(none) }}"
+          interface: "{{ ansible_facts['default_ipv4'].interface | default(none) }}"
+          wol_supported: null
+          wol_enabled: null
+          poweroff: "sudo -n /sbin/shutdown -h now"
+          reboot: "sudo -n /sbin/shutdown -r now"
+
+    - name: Write hosts.yaml on the control node  # noqa: run-once[task] - linear strategy expected
+      run_once: true
+      delegate_to: localhost
+      become: false
+      vars:
+        ex_hosts: >-
+          {{ ansible_play_hosts_all | map('extract', hostvars)
+             | selectattr('ex_record', 'defined') | map(attribute='ex_record')
+             | sort(attribute='name') | list }}
+      ansible.builtin.copy:
+        dest: "{{ export_file | default(playbook_dir ~ '/../hosts.yaml') }}"
+        mode: "0644"
+        content: |
+          # Generated by openHAB-Host-Power-Scaffolding (ansible/export_hosts.yml).
+          # Do not edit - put changes into overrides.yaml; re-export overwrites this file.
+          {{ {'version': 1, 'source': 'ansible', 'hosts': ex_hosts} | to_nice_yaml(indent=2, sort_keys=false) }}

@@ -1,0 +1,31 @@
+---
+# Sets pa_cmd_poweroff / pa_cmd_reboot to absolute command lines (as root would run them).
+# systemctl is used when systemd is the running init system, otherwise shutdown.
+- name: Locate systemctl and shutdown
+  ansible.builtin.shell:
+    cmd: |
+      [ -d /run/systemd/system ] && echo "systemd=yes" || echo "systemd=no"
+      echo "systemctl=$(command -v systemctl || true)"
+      echo "shutdown=$(command -v shutdown || true)"
+  register: pa_paths
+  changed_when: false
+
+- name: Remember the power commands
+  ansible.builtin.set_fact:
+    pa_systemd: "{{ 'systemd=yes' in pa_paths.stdout_lines }}"
+    pa_systemctl: "{{ pa_paths.stdout_lines | select('match', '^systemctl=') | first | regex_replace('^systemctl=', '') }}"
+    pa_shutdown: "{{ pa_paths.stdout_lines | select('match', '^shutdown=') | first | regex_replace('^shutdown=', '') }}"
+
+- name: Fail if neither systemctl nor shutdown exists
+  ansible.builtin.assert:
+    that: pa_systemctl | length > 0 or pa_shutdown | length > 0
+    fail_msg: "{{ inventory_hostname }}: neither systemctl nor shutdown found."
+
+- name: Build the command lines
+  ansible.builtin.set_fact:
+    pa_cmd_poweroff: >-
+      {{ (pa_systemctl ~ ' poweroff') if (pa_systemctl and (pa_systemd or not pa_shutdown))
+         else (pa_shutdown ~ ' -h now') }}
+    pa_cmd_reboot: >-
+      {{ (pa_systemctl ~ ' reboot') if (pa_systemctl and (pa_systemd or not pa_shutdown))
+         else (pa_shutdown ~ ' -r now') }}

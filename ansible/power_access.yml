@@ -1,0 +1,67 @@
+---
+# Give one account on every Linux target the right to run exactly "poweroff" and
+# "reboot" via sudo without a password – and nothing else.
+#
+#   ansible-playbook ansible/power_access.yml -e target_hosts='all:!openhab-vm'
+#   ansible-playbook ansible/power_access.yml -e power_user=sysadmin -e create_power_user=false
+#
+# Variables (all optional, -e or host_vars/group_vars):
+#   target_hosts       inventory pattern                         (default: all)
+#   power_user         account openHAB logs in as                (default: ohpower)
+#   create_power_user  create it as a dedicated, locked account  (default: true)
+#   power_user_shell   login shell of a created account          (default: /bin/sh)
+#   sudoers_file       drop-in path                              (default: /etc/sudoers.d/openhab-power)
+
+- name: Grant the openHAB power account poweroff and reboot
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+  gather_facts: true
+  vars:
+    pa_user: "{{ power_user | default('ohpower') }}"
+    pa_create: "{{ create_power_user | default(true) | bool }}"
+    pa_shell: "{{ power_user_shell | default('/bin/sh') }}"
+    pa_sudoers: "{{ sudoers_file | default('/etc/sudoers.d/openhab-power') }}"
+  tasks:
+    - name: Skip non-Linux hosts (Windows/macOS need no sudoers, see README)
+      when: ansible_facts['system'] != 'Linux'
+      block:
+        - name: Report skipped host
+          ansible.builtin.debug:
+            msg: "{{ inventory_hostname }} ({{ ansible_facts['system'] | default(ansible_facts['os_family']) }}): skipped."
+        - name: End this host
+          ansible.builtin.meta: end_host
+
+    - name: Create the dedicated power account (locked password, key login only)
+      ansible.builtin.user:
+        name: "{{ pa_user }}"
+        comment: "openHAB power control (openHAB-Host-Power-Scaffolding)"
+        shell: "{{ pa_shell }}"
+        create_home: true
+        password: "!"
+        update_password: on_create
+      when: pa_create
+
+    - name: Check that the power account exists
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ pa_user }}"
+
+    - name: Determine the poweroff/reboot commands
+      ansible.builtin.include_tasks: tasks/linux_power_commands.yml
+
+    - name: Write the sudoers drop-in (validated with visudo)
+      ansible.builtin.copy:
+        dest: "{{ pa_sudoers }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: visudo -cf %s
+        content: |
+          # Managed by openHAB-Host-Power-Scaffolding (ansible/power_access.yml) - do not edit.
+          # {{ pa_user }} may power off and reboot this host, nothing else.
+          Defaults:{{ pa_user }} !requiretty
+          {{ pa_user }} ALL=(root) NOPASSWD: {{ pa_cmd_poweroff }}, {{ pa_cmd_reboot }}
+
+    - name: Show the granted commands
+      ansible.builtin.debug:
+        msg: "{{ pa_user }}@{{ inventory_hostname }}: sudo -n {{ pa_cmd_poweroff }} | sudo -n {{ pa_cmd_reboot }}"
