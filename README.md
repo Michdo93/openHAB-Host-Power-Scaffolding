@@ -224,7 +224,7 @@ sudoers entry yourself). Both paths are untested.
 * `pytest` – model, rendering of all three languages, validator, and the generated JavaScript
   and Python rules executed against mocked openhab-js / openhab-python APIs
   (`tests/harness/`).
-* `sudo tests/e2e/lab.sh` – the whole chain on one machine: two sshd as targets, an `openhab`
+* `sudo bash tests/e2e/lab.sh` – the whole chain on one machine: two sshd as targets, an `openhab`
   system account, `power_access.yml` (incl. idempotence), `distribute.yml` of
   ansible-ssh-key-distribution, `export_hosts.yml`, all three generators; the JS/Python rules
   and the Exec Things (whitelist check + `sh -c`, as the binding does) run their SSH commands
@@ -249,4 +249,3 @@ openHAB-Host-Power-Scaffolding/
 │   └── templates/                 host_power.things/.items/.rules/.js/.py.j2, exec.whitelist.j2
 ├── generate.py                    CLI: render | validate | list
 └── tests/                         pytest, harnesses, e2e/lab.sh
-```
