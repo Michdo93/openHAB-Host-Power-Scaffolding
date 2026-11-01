@@ -1,6 +1,6 @@
 __pycache__/
 .pytest_cache/
 .venv/
-hosts.yaml
-overrides.yaml
-out/
+/hosts.yaml
+/overrides.yaml
+/out/
